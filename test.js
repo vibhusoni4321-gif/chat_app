@@ -1,7 +1,7 @@
 // End-to-end test: starts the server and drives it with socket.io clients.
 const assert = require('assert');
 const { io: Client } = require('socket.io-client');
-const { server } = require('./server');
+const { server, ready } = require('./server');
 
 const emit = (s, ev, data) => new Promise((r) => s.emit(ev, data, r));
 const once = (s, ev, pred = () => true) =>
@@ -9,6 +9,7 @@ const once = (s, ev, pred = () => true) =>
 const connect = (url) => new Promise((res) => { const s = Client(url); s.on('connect', () => res(s)); });
 
 (async () => {
+  await ready;
   await new Promise((r) => server.listen(0, r));
   const url = `http://localhost:${server.address().port}`;
   const a = await connect(url), b = await connect(url), c = await connect(url);
@@ -76,6 +77,15 @@ const connect = (url) => new Promise((res) => { const s = Client(url); s.on('con
   b.close();
   await left;
   console.log('✔ disconnect removes user from room');
+
+  // history: a newcomer sees earlier messages and files
+  const d = await connect(url);
+  await emit(d, 'login', 'dave');
+  const joined = await emit(d, 'room:join', { room: 'secret', password: 'pw123' });
+  assert(joined.history.some((x) => x.type === 'text' && x.text === 'hello bob'), 'text in history');
+  assert(joined.history.some((x) => x.type === 'file' && x.file.name === 'note.txt'), 'file in history');
+  assert(!joined.history.some((x) => x.type === 'system'), 'system notices are not saved');
+  console.log('✔ message history is stored and replayed');
 
   console.log('\nAll tests passed');
   process.exit(0);
