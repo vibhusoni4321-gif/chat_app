@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Realtime Chat</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Login -->
+  <div id="login" class="overlay">
+    <form id="loginForm" class="card">
+      <h1>Realtime Chat</h1>
+      <p class="muted">Pick a display name to get started.</p>
+      <input id="nameInput" placeholder="Your name" maxlength="20" autofocus />
+      <button>Join</button>
+      <p id="loginErr" class="err"></p>
+    </form>
+  </div>
+
+  <!-- Password prompt -->
+  <div id="pwModal" class="overlay hidden">
+    <form id="pwForm" class="card">
+      <h2 id="pwTitle">Private room</h2>
+      <input id="pwInput" type="password" placeholder="Room password" />
+      <div class="row">
+        <button type="button" id="pwCancel" class="secondary">Cancel</button>
+        <button>Join</button>
+      </div>
+      <p id="pwErr" class="err"></p>
+    </form>
+  </div>
+
+  <div id="app" class="app hidden">
+    <aside class="sidebar">
+      <div class="me">
+        <span id="meName"></span>
+        <select id="statusSel">
+          <option value="online">🟢 Online</option>
+          <option value="away">🟡 Away</option>
+          <option value="busy">🔴 Busy</option>
+        </select>
+      </div>
+
+      <h3>Rooms</h3>
+      <ul id="roomList" class="list"></ul>
+
+      <form id="createForm" class="create">
+        <input id="newRoom" placeholder="New room name" maxlength="30" />
+        <input id="newPw" type="password" placeholder="Password (optional)" maxlength="64" />
+        <button>Create room</button>
+        <p id="createErr" class="err"></p>
+      </form>
+    </aside>
+
+    <main class="chat">
+      <header>
+        <div>
+          <strong id="roomTitle">Select a room</strong>
+          <span id="roomLock"></span>
+        </div>
+        <button id="leaveBtn" class="secondary hidden">Leave</button>
+      </header>
+      <div id="messages" class="messages"></div>
+      <div id="typing" class="typing"></div>
+      <form id="msgForm" class="composer hidden">
+        <label class="attach" title="Share a file (max 10 MB)">
+          📎<input id="fileInput" type="file" hidden />
+        </label>
+        <input id="msgInput" placeholder="Type a message…" autocomplete="off" maxlength="2000" />
+        <button>Send</button>
+      </form>
+    </main>
+
+    <aside class="members">
+      <h3>In this room</h3>
+      <ul id="memberList" class="list"></ul>
+    </aside>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
