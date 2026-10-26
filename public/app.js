@@ -96,6 +96,14 @@
   $('membersBtn').onclick = () => toggleDrawer('show-members');
   $('backdrop').onclick = closeDrawers;
 
+  // ---------- owner contact (built in JS so scrapers don't pick the address out of the HTML) ----------
+  (() => {
+    const mail = ['vibhusoni1234', 'gmail.com'].join('@');
+    const link = $('ownerMail');
+    link.textContent = mail;
+    link.href = 'mailto:' + mail;
+  })();
+
   // ---------- login ----------
   $('nameInput').value = prefs.get('name') || '';
   $('loginForm').addEventListener('submit', (e) => {
