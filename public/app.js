@@ -101,7 +101,15 @@
     const mail = ['vibhusoni1234', 'gmail.com'].join('@');
     const link = $('ownerMail');
     link.textContent = mail;
-    link.href = 'mailto:' + mail;
+    // Opens Gmail's compose window in the browser (needs to be signed in to Gmail), instead of the
+    // computer's default mail app (e.g. Outlook), which is what a mailto: link would launch.
+    link.href = 'https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(mail);
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    $('copyMail').onclick = async () => {
+      try { await navigator.clipboard.writeText(mail); toast('Email address copied'); }
+      catch { toast(mail); }
+    };
   })();
 
   // ---------- login ----------
