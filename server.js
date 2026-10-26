@@ -19,15 +19,19 @@ const users = new Map(); // socket.id -> { name, status }
 const rooms = new Map(); // roomName -> { passwordHash, salt, owner, members:Set<socket.id> }
 
 const STATUSES = ['online', 'away', 'busy'];
+const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🎉', '🔥', '👀'];
 
 const hash = (pw, salt) => crypto.scryptSync(pw, salt, 32).toString('hex');
 const clean = (s, max = 30) => String(s || '').replace(/[<>]/g, '').trim().slice(0, max);
 const now = () => Date.now();
 const logErr = (what) => (e) => console.error(`[store] ${what} failed:`, e.message);
+const blank = (o) => ({ replyTo: null, edited: false, deleted: false, reactions: {}, ...o });
+const snippet = (m) =>
+  m.deleted ? 'Message deleted' : m.type === 'file' ? `📎 ${(m.file && m.file.name) || 'file'}` : String(m.text || '').slice(0, 100);
 
 function roomInfo(name) {
   const r = rooms.get(name);
-  return { name, private: !!r.passwordHash, count: r.members.size };
+  return { name, private: !!r.passwordHash, count: r.members.size, owner: r.owner };
 }
 function publicRoomList() {
   return [...rooms.keys()].map(roomInfo);
@@ -48,8 +52,9 @@ function broadcastRooms() {
 }
 function pushMessage(roomName, msg) {
   if (!rooms.has(roomName)) return;
-  io.to(roomName).emit('message', msg);
-  store.saveMessage(msg).catch(logErr('saveMessage'));
+  const m = blank(msg);
+  io.to(roomName).emit('message', m);
+  store.saveMessage(m).catch(logErr('saveMessage'));
 }
 // Join/leave notices are shown live but not saved to history
 function systemMsg(room, text) {
@@ -88,6 +93,7 @@ const upload = multer({
   limits: { fileSize: MAX_FILE_MB * 1024 * 1024 },
 });
 
+app.get('/healthz', (req, res) => res.send('ok'));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.post('/upload', (req, res) => {
@@ -135,8 +141,9 @@ app.get('/files/:key', async (req, res) => {
     if (!file) return res.status(404).send('Not found');
     res.set({
       'Content-Type': file.mime || 'application/octet-stream',
-      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(meta.name)}`,
+      'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(meta.name)}`,
       'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
     });
     res.send(file.data);
   } catch (e) {
@@ -147,14 +154,30 @@ app.get('/files/:key', async (req, res) => {
 
 // ---------- sockets ----------
 io.on('connection', (socket) => {
+  // Simple flood control: at most 10 chat actions per 5 seconds per connection
+  const hits = [];
+  const allow = () => {
+    const t = Date.now();
+    while (hits.length && t - hits[0] > 5000) hits.shift();
+    if (hits.length >= 10) return false;
+    hits.push(t);
+    return true;
+  };
+  // Resolves the acting user + room if the socket is a member, else null
+  const ctx = (room) => {
+    const u = users.get(socket.id);
+    const r = rooms.get(room);
+    return u && r && r.members.has(socket.id) ? { u, r } : null;
+  };
+
   socket.on('login', async (rawName, cb) => {
     await ready;
     const name = clean(rawName, 20);
     if (!name) return cb({ error: 'Enter a name' });
-    const taken = [...users.values()].some((u) => u.name.toLowerCase() === name.toLowerCase());
+    const taken = [...users.entries()].some(([id, u]) => id !== socket.id && u.name.toLowerCase() === name.toLowerCase());
     if (taken) return cb({ error: 'That name is already in use' });
     users.set(socket.id, { name, status: 'online' });
-    cb({ ok: true, name, id: socket.id, rooms: publicRoomList(), statuses: STATUSES });
+    cb({ ok: true, name, id: socket.id, rooms: publicRoomList(), statuses: STATUSES, reactions: REACTIONS });
   });
 
   socket.on('room:create', async ({ room, password }, cb) => {
@@ -201,19 +224,67 @@ io.on('connection', (socket) => {
 
   socket.on('room:leave', (room) => leaveRoom(socket, room));
 
-  socket.on('message', ({ room, text }) => {
-    const u = users.get(socket.id);
-    const r = rooms.get(room);
-    const body = String(text || '').slice(0, 2000).trim();
-    if (!u || !r || !r.members.has(socket.id) || !body) return;
-    pushMessage(room, { id: crypto.randomUUID(), type: 'text', room, user: u.name, text: body, ts: now() });
+  socket.on('message', async ({ room, text, replyTo }) => {
+    try {
+      const c = ctx(room);
+      const body = String(text || '').slice(0, 2000).trim();
+      if (!c || !body) return;
+      if (!allow()) return socket.emit('toast', 'You are sending messages too fast');
+      let reply = null;
+      if (replyTo) {
+        const o = await store.getMessage(String(replyTo));
+        if (o && o.room === room && !o.deleted) reply = { id: o.id, user: o.user, text: snippet(o) };
+      }
+      pushMessage(room, { id: crypto.randomUUID(), type: 'text', room, user: c.u.name, text: body, ts: now(), replyTo: reply });
+    } catch (e) { logErr('message')(e); }
+  });
+
+  socket.on('message:edit', async ({ room, id, text }) => {
+    try {
+      const c = ctx(room);
+      const body = String(text || '').slice(0, 2000).trim();
+      if (!c || !body || !allow()) return;
+      const m = await store.getMessage(String(id));
+      if (!m || m.room !== room || m.user !== c.u.name || m.type !== 'text' || m.deleted) return;
+      const upd = await store.updateMessage(m.id, { text: body, edited: true });
+      if (upd) io.to(room).emit('message:update', upd);
+    } catch (e) { logErr('edit')(e); }
+  });
+
+  // Authors can delete their own messages; the room owner can delete any message in their room
+  socket.on('message:delete', async ({ room, id }) => {
+    try {
+      const c = ctx(room);
+      if (!c || !allow()) return;
+      const m = await store.getMessage(String(id));
+      if (!m || m.room !== room || m.deleted) return;
+      if (m.user !== c.u.name && c.r.owner !== c.u.name) return;
+      const key = m.file && m.file.key;
+      const upd = await store.updateMessage(m.id, { deleted: true });
+      if (key) store.deleteFile(key).catch(logErr('deleteFile'));
+      if (upd) io.to(room).emit('message:update', upd);
+    } catch (e) { logErr('delete')(e); }
+  });
+
+  socket.on('message:react', async ({ room, id, emoji }) => {
+    try {
+      const c = ctx(room);
+      if (!c || !REACTIONS.includes(emoji) || !allow()) return;
+      const m = await store.getMessage(String(id));
+      if (!m || m.room !== room || m.deleted) return;
+      const reactions = { ...(m.reactions || {}) };
+      const set = new Set(reactions[emoji] || []);
+      if (set.has(c.u.name)) set.delete(c.u.name); else set.add(c.u.name);
+      if (set.size) reactions[emoji] = [...set]; else delete reactions[emoji];
+      const upd = await store.updateMessage(m.id, { reactions });
+      if (upd) io.to(room).emit('message:update', upd);
+    } catch (e) { logErr('react')(e); }
   });
 
   socket.on('typing', ({ room, typing }) => {
-    const u = users.get(socket.id);
-    const r = rooms.get(room);
-    if (!u || !r || !r.members.has(socket.id)) return;
-    socket.to(room).emit('typing', { room, user: u.name, typing: !!typing });
+    const c = ctx(room);
+    if (!c) return;
+    socket.to(room).emit('typing', { room, user: c.u.name, typing: !!typing });
   });
 
   socket.on('status', (status) => {

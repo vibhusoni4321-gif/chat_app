@@ -1,20 +1,28 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Realtime Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0d17" />
+  <title>Pulse Chat</title>
+  <script>
+    // Apply saved theme before first paint (avoids a flash)
+    try { var t = localStorage.getItem('theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <!-- Login -->
-  <div id="login" class="overlay">
-    <form id="loginForm" class="card">
-      <h1>Realtime Chat</h1>
-      <p class="muted">Pick a display name to get started.</p>
-      <input id="nameInput" placeholder="Your name" maxlength="20" autofocus />
-      <button>Join</button>
-      <p id="loginErr" class="err"></p>
+  <div id="login" class="overlay login">
+    <form id="loginForm" class="card hero">
+      <div class="logo big">
+        <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg>
+      </div>
+      <h1>Pulse Chat</h1>
+      <p class="muted">Private rooms, live presence and instant file sharing.</p>
+      <input id="nameInput" placeholder="Choose a display name" maxlength="20" autocomplete="nickname" autofocus />
+      <button class="primary">Start chatting</button>
+      <p id="loginErr" class="err" role="alert"></p>
     </form>
   </div>
 
@@ -22,61 +30,105 @@
   <div id="pwModal" class="overlay hidden">
     <form id="pwForm" class="card">
       <h2 id="pwTitle">Private room</h2>
-      <input id="pwInput" type="password" placeholder="Room password" />
-      <div class="row">
-        <button type="button" id="pwCancel" class="secondary">Cancel</button>
-        <button>Join</button>
+      <p class="muted">This room is protected. Enter the password to join.</p>
+      <input id="pwInput" type="password" placeholder="Room password" autocomplete="off" />
+      <div class="row-btns">
+        <button type="button" id="pwCancel" class="ghost">Cancel</button>
+        <button class="primary">Join</button>
       </div>
-      <p id="pwErr" class="err"></p>
+      <p id="pwErr" class="err" role="alert"></p>
     </form>
   </div>
 
+  <div id="conn" class="conn hidden">Connection lost. Reconnecting…</div>
+  <div id="backdrop" class="backdrop"></div>
+
   <div id="app" class="app hidden">
+    <!-- Sidebar -->
     <aside class="sidebar">
-      <div class="me">
-        <span id="meName"></span>
-        <select id="statusSel">
-          <option value="online">🟢 Online</option>
-          <option value="away">🟡 Away</option>
-          <option value="busy">🔴 Busy</option>
-        </select>
+      <div class="brand">
+        <div class="logo">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg>
+        </div>
+        <span>Pulse Chat</span>
+      </div>
+
+      <div class="me-card">
+        <div id="meAvatar" class="avatar lg"></div>
+        <div class="me-info">
+          <strong id="meName"></strong>
+          <select id="statusSel" aria-label="Your status">
+            <option value="online">🟢 Online</option>
+            <option value="away">🟡 Away</option>
+            <option value="busy">🔴 Busy</option>
+          </select>
+        </div>
       </div>
 
       <h3>Rooms</h3>
-      <ul id="roomList" class="list"></ul>
+      <ul id="roomList" class="list rooms"></ul>
 
-      <form id="createForm" class="create">
-        <input id="newRoom" placeholder="New room name" maxlength="30" />
-        <input id="newPw" type="password" placeholder="Password (optional)" maxlength="64" />
-        <button>Create room</button>
-        <p id="createErr" class="err"></p>
-      </form>
+      <details class="create">
+        <summary>＋ New room</summary>
+        <form id="createForm">
+          <input id="newRoom" placeholder="Room name" maxlength="30" />
+          <input id="newPw" type="password" placeholder="Password (optional, makes it private)" maxlength="64" autocomplete="new-password" />
+          <button class="primary">Create room</button>
+          <p id="createErr" class="err" role="alert"></p>
+        </form>
+      </details>
     </aside>
 
+    <!-- Chat -->
     <main class="chat">
-      <header>
-        <div>
+      <header class="topbar">
+        <button id="menuBtn" class="icon mobile-only" title="Rooms" aria-label="Rooms">☰</button>
+        <div class="title">
           <strong id="roomTitle">Select a room</strong>
-          <span id="roomLock"></span>
+          <span id="roomLock" class="lock"></span>
+          <span id="roomSub" class="muted small"></span>
         </div>
-        <button id="leaveBtn" class="secondary hidden">Leave</button>
+        <input id="search" class="search" type="search" placeholder="Search messages…" aria-label="Search messages" />
+        <button id="soundBtn" class="icon" title="Sound notifications" aria-label="Toggle sound">🔔</button>
+        <button id="themeBtn" class="icon" title="Switch theme" aria-label="Switch theme">☀️</button>
+        <button id="membersBtn" class="icon mobile-only" title="Members" aria-label="Members">👥</button>
+        <button id="leaveBtn" class="ghost hidden">Leave</button>
       </header>
-      <div id="messages" class="messages"></div>
+
+      <div id="messages" class="messages" aria-live="polite"></div>
       <div id="typing" class="typing"></div>
+
+      <div id="uploadBar" class="upload-bar" hidden><div></div></div>
+      <div id="replyBar" class="reply-bar hidden">
+        <div class="reply-text">
+          <span class="muted">Replying to</span> <b id="replyUser"></b>
+          <div id="replyText" class="clip"></div>
+        </div>
+        <button id="replyClose" class="icon" aria-label="Cancel reply">✕</button>
+      </div>
+
       <form id="msgForm" class="composer hidden">
-        <label class="attach" title="Share a file (max 10 MB)">
-          📎<input id="fileInput" type="file" hidden />
+        <label class="icon attach" title="Share a file (max 10 MB)">
+          📎<input id="fileInput" type="file" hidden multiple />
         </label>
-        <input id="msgInput" placeholder="Type a message…" autocomplete="off" maxlength="2000" />
-        <button>Send</button>
+        <button type="button" id="emojiBtn" class="icon" title="Emoji" aria-label="Emoji">😊</button>
+        <textarea id="msgInput" rows="1" placeholder="Type a message…" maxlength="2000"></textarea>
+        <button id="sendBtn" class="primary send" aria-label="Send">➤</button>
       </form>
     </main>
 
+    <!-- Members -->
     <aside class="members">
-      <h3>In this room</h3>
+      <h3>In this room <span id="memberCount" class="pill">0</span></h3>
       <ul id="memberList" class="list"></ul>
     </aside>
   </div>
+
+  <div id="emojiPicker" class="popover emoji-picker hidden"></div>
+  <div id="reactPop" class="popover react-pop hidden"></div>
+  <div id="lightbox" class="lightbox hidden"><img id="lightImg" alt="" /></div>
+  <div id="dropOverlay" class="drop-overlay hidden"><div>Drop files to share them in this room</div></div>
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="app.js"></script>

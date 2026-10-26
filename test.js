@@ -72,6 +72,40 @@ const connect = (url) => new Promise((res) => { const s = Client(url); s.on('con
   assert.strictEqual((await fetch(url + '/upload', { method: 'POST', body: fd2 })).status, 403);
   console.log('✔ file upload, download, and access control');
 
+  // replies, reactions, edit and delete (with permission checks)
+  const t1 = once(b, 'message', (x) => x.type === 'text' && x.text === 'original');
+  a.emit('message', { room: 'secret', text: 'original' });
+  const orig = await t1;
+  const t2 = once(a, 'message', (x) => x.text === 'a reply');
+  b.emit('message', { room: 'secret', text: 'a reply', replyTo: orig.id });
+  const rep = await t2;
+  assert.strictEqual(rep.replyTo.id, orig.id);
+  assert.strictEqual(rep.replyTo.user, 'alice');
+  console.log('✔ replies');
+
+  const t3 = once(a, 'message:update', (x) => x.id === orig.id && x.reactions['🔥']);
+  b.emit('message:react', { room: 'secret', id: orig.id, emoji: '🔥' });
+  assert.deepStrictEqual((await t3).reactions['🔥'], ['bob']);
+  b.emit('message:react', { room: 'secret', id: orig.id, emoji: '💩' }); // not in the allowed set: ignored
+  const t3b = once(a, 'message:update', (x) => x.id === orig.id && !x.reactions['🔥']);
+  b.emit('message:react', { room: 'secret', id: orig.id, emoji: '🔥' }); // toggles off
+  await t3b;
+  console.log('✔ reactions (toggle, allow-list)');
+
+  b.emit('message:edit', { room: 'secret', id: orig.id, text: 'hacked' }); // not the author: ignored
+  const t4 = once(b, 'message:update', (x) => x.id === orig.id && x.edited);
+  a.emit('message:edit', { room: 'secret', id: orig.id, text: 'edited text' });
+  const ed = await t4;
+  assert.strictEqual(ed.text, 'edited text');
+  console.log('✔ edit (author only)');
+
+  b.emit('message:delete', { room: 'secret', id: orig.id }); // bob is not author or owner: ignored
+  const t5 = once(b, 'message:update', (x) => x.id === orig.id && x.deleted);
+  a.emit('message:delete', { room: 'secret', id: orig.id });
+  const del = await t5;
+  assert.strictEqual(del.text, '');
+  console.log('✔ delete (author or room owner)');
+
   // disconnect cleans up
   const left = once(a, 'room:members', (d) => d.members.length === 1);
   b.close();
