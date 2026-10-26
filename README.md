@@ -1,90 +1,83 @@
-# Pulse Chat
+Pulse Chat
+A web-based chat application built for real-time conversations, private
+rooms, and easy file sharing.
 
-A real-time chat app built on WebSockets (Socket.IO) with private rooms, live presence, file sharing and saved history (PostgreSQL).
+Live Demo: https://chat-app-i6yd.onrender.com/
+Overview
+Pulse Chat provides a simple interface for chatting in rooms. Users can
+choose a display name, create rooms, and join password-protected rooms.
+The interface also includes message search and controls for room members
+and notifications.
+Features
+- Chat rooms --- create and select rooms for conversations.
+- Private rooms --- optionally protect a room with a password.
+- Display names --- choose a name before starting to chat.
+- Live presence --- designed to show who is present in a room.
+- File sharing --- supports sharing files in chat.
+- Message search --- search messages within the chat interface.
+- Room member controls --- view room participants.
+- Notifications and appearance controls --- access notification
+  and theme controls from the interface.
+Note: Features may depend on the current deployment and application
+configuration.
 
-## Run locally
+Getting Started
+Use the live application
+1. Open Pulse Chat.
+2. Enter a display name.
+3. Select Start chatting.
+4. Choose an existing room or create a new one.
+5. To create a private room, provide a password when creating the room.
+6. To join a protected room, enter its password when prompted.
+Creating a Room
+1. Open the New room option.
+2. Enter a room name.
+3. Optionally set a password to make the room private.
+4. Select Create room.
+Searching Messages
+Use the message search field in the chat interface to look for messages
+in the selected room.
+Technology Stack
+The live website does not expose enough information to verify the
+application's framework, backend, database, or real-time transport. Add
+the technologies used by your project here, for example:
+- Frontend: [e.g., HTML, CSS, JavaScript / React]
+- Backend: [e.g., Node.js and Express]
+- Real-time messaging: [e.g., Socket.IO / WebSockets]
+- Database: [database, if applicable]
+- Hosting: Render
+Replace the placeholders with the actual technologies used in the source
+code.
+Run Locally
+The repository's source code and dependency files are needed to provide
+accurate installation commands. Once you add this README to the project
+repository, update this section with your actual setup steps, such as:
+1. Clone the repository.
+2. Install the dependencies using the package manager specified by the
+   project.
+3. Configure any required environment variables in a local .env file.
+4. Start the application using the project's documented development
+   command.
+Do not commit passwords, API keys, or other secrets to version control.
+Security and Privacy
+- Use a strong, unique password for private rooms.
+- Do not share sensitive personal information in chat.
+- A password-protected room should not be assumed to provide
+  end-to-end encryption unless the application explicitly implements
+  and documents it.
+Deployment
+The application is currently available at:
 
-```bash
-npm install
-npm start          # http://localhost:3000
-npm test           # end-to-end test of rooms, presence, files, history, reactions, edit/delete
-```
+https://chat-app-i6yd.onrender.com/
 
-Without `DATABASE_URL` the app stores everything in memory (lost on restart). To save history locally, set `DATABASE_URL` to a Postgres connection string before `npm start`:
-
-```powershell
-$env:DATABASE_URL = "postgresql://user:password@host/dbname?sslmode=require"
-npm start
-```
-
-Tables are created (and upgraded from older versions) automatically on startup. The console prints `Storage: postgres` when the database is in use.
-
-## Features
-
-**Rooms and presence**
-- Everyone starts in `#lobby`. Create rooms; add a password to make one private (🔒). Passwords are hashed with scrypt. Rooms persist across restarts.
-- Live member list per room with online / away / busy; status switches to *away* automatically when the tab is hidden.
-
-**Messaging**
-- Reply to messages (quoted preview, click to jump to the original).
-- Edit and delete your own messages. The room's creator can delete any message in their room.
-- Emoji reactions (8 quick reactions, toggle on/off) and an emoji picker in the composer.
-- Links are clickable, `@name` mentions are highlighted, and a mention plays a sound / toast.
-- Search messages in the current room. Typing indicators, date separators, grouped messages.
-- Multi-line messages (Shift+Enter).
-
-**Files**
-- Click 📎, drag and drop, or paste an image (max 10 MB, up to 5 at once) with a progress bar. Images preview inline and open in a lightbox. Only room members can upload to or download from a room.
-
-**Experience**
-- Modern dark and light themes (remembered), colour avatars, mobile-friendly layout with slide-in panels.
-- Unread count in the tab title and optional sound when the tab is in the background.
-- Auto-reconnect: if the connection drops, it logs back in and rejoins your room without a reload.
-- Flood control (10 chat actions per 5 seconds per connection).
-
-## Deploy (Render + Neon Postgres)
-
-1. Push this repo to GitHub (`node_modules` is ignored by `.gitignore`).
-2. Create a Postgres database (e.g. at neon.tech) and copy its connection string.
-3. On render.com: **New + → Web Service**, select the repo, Runtime `Node`, Build Command `npm install`, Start Command `npm start`.
-4. Add the environment variable `DATABASE_URL` = your connection string, then create the service.
-5. Open the `https://….onrender.com` URL from any device. Secure WebSockets work automatically.
-
-`/healthz` returns `ok` and can be used as the host's health check.
-
-### Keeping history and avoiding sleep
-
-- **History is kept as long as the database exists.** Nothing is ever deleted automatically. Use a database that does not expire: a free Neon project keeps its data indefinitely. (Render's own free Postgres is deleted after about 30 days, so do not use it if you want history for months.)
-- **Check the logs after every deploy.** They must say `Storage: postgres`. If they say `Storage: memory`, `DATABASE_URL` is missing or wrong and history is lost on every restart.
-- **Render's free tier puts the app to sleep after ~15 minutes without visitors.** With the database set up, sleeping does not lose history; the first visit afterwards just takes 30 to 60 seconds. To keep it awake, create a free monitor at uptimerobot.com (or cron-job.org) that requests `https://YOUR-APP.onrender.com/healthz` every 5 minutes. A paid Render plan removes sleeping entirely.
-- The last 100 messages load when you join a room; **Load earlier messages** at the top pages back through the whole archive.
-
-## Structure
-
-```
-server.js        Express + Socket.IO server
-store.js         Storage layer: PostgreSQL (DATABASE_URL) or in-memory fallback
-public/          index.html, style.css, app.js (vanilla JS client, no build step)
-test.js          End-to-end test using socket.io-client
-```
-
-## Socket.IO events
-
-| Event | Direction | Purpose |
-|---|---|---|
-| `login` | client → server | Claim a display name |
-| `room:create`, `room:join`, `room:leave` | client → server | Room lifecycle (join takes optional password) |
-| `message` | both | Send `{room, text, replyTo?}`; server broadcasts the saved message |
-| `message:edit`, `message:delete`, `message:react` | client → server | Change a message |
-| `history:more` | client → server | Fetch older messages `{room, before}` |
-| `message:update` | server → client | A message was edited, deleted or reacted to |
-| `typing`, `status` | client → server | Typing state, presence status |
-| `typing`, `room:members`, `rooms:list`, `toast` | server → client | Broadcasts and notices |
-| `POST /upload` | HTTP | Multipart upload; server then broadcasts a `file` message to the room |
-
-## Limitations and next steps
-
-- Display names are not accounts: anyone can use a free name, and could edit or delete old messages under a name whose owner has left. Add real sign-up/login before opening it to the public.
-- Files are stored in the database, fine for small scale. For heavy use, move them to object storage (S3 / Cloudflare R2).
-- Single server process. To scale out, add the Socket.IO Redis adapter.
-- Possible additions: direct messages, message pinning, link previews, push notifications.
+For deployment instructions, use the configuration and start command
+defined in the project's source repository and Render service settings.
+Contributing
+Contributions are welcome if this project is open to them.
+1. Fork the repository.
+2. Create a branch for your change.
+3. Make and test your changes.
+4. Submit a pull request describing the update.
+License
+Add the license used by this project. If no license has been selected,
+confirm one before presenting the project as open source.
