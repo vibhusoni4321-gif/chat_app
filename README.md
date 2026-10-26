@@ -50,7 +50,14 @@ Tables are created (and upgraded from older versions) automatically on startup. 
 4. Add the environment variable `DATABASE_URL` = your connection string, then create the service.
 5. Open the `https://….onrender.com` URL from any device. Secure WebSockets work automatically.
 
-`/healthz` returns `ok` and can be used as the host's health check. Free tiers may sleep when idle (first load is then slow); history stays in the database.
+`/healthz` returns `ok` and can be used as the host's health check.
+
+### Keeping history and avoiding sleep
+
+- **History is kept as long as the database exists.** Nothing is ever deleted automatically. Use a database that does not expire: a free Neon project keeps its data indefinitely. (Render's own free Postgres is deleted after about 30 days, so do not use it if you want history for months.)
+- **Check the logs after every deploy.** They must say `Storage: postgres`. If they say `Storage: memory`, `DATABASE_URL` is missing or wrong and history is lost on every restart.
+- **Render's free tier puts the app to sleep after ~15 minutes without visitors.** With the database set up, sleeping does not lose history; the first visit afterwards just takes 30 to 60 seconds. To keep it awake, create a free monitor at uptimerobot.com (or cron-job.org) that requests `https://YOUR-APP.onrender.com/healthz` every 5 minutes. A paid Render plan removes sleeping entirely.
+- The last 100 messages load when you join a room; **Load earlier messages** at the top pages back through the whole archive.
 
 ## Structure
 
@@ -69,6 +76,7 @@ test.js          End-to-end test using socket.io-client
 | `room:create`, `room:join`, `room:leave` | client → server | Room lifecycle (join takes optional password) |
 | `message` | both | Send `{room, text, replyTo?}`; server broadcasts the saved message |
 | `message:edit`, `message:delete`, `message:react` | client → server | Change a message |
+| `history:more` | client → server | Fetch older messages `{room, before}` |
 | `message:update` | server → client | A message was edited, deleted or reacted to |
 | `typing`, `status` | client → server | Typing state, presence status |
 | `typing`, `room:members`, `rooms:list`, `toast` | server → client | Broadcasts and notices |

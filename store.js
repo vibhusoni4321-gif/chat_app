@@ -29,7 +29,9 @@ function memoryStore() {
       list.push(m);
       if (list.length > 1000) list.shift();
     },
-    async history(room) { return (messages.get(room) || []).slice(-HISTORY_LIMIT); },
+    async history(room, before = Infinity, limit = HISTORY_LIMIT) {
+      return (messages.get(room) || []).filter((m) => m.ts < before).slice(-limit);
+    },
     async getMessage(id) { return find(id); },
     // patch may contain: text, edited, reactions, deleted
     async updateMessage(id, patch) {
@@ -58,7 +60,24 @@ function pgStore(connectionString) {
     connectionString,
     ssl: local ? false : { rejectUnauthorized: false }, // hosted DBs (Neon, Render, Supabase) need SSL
     max: 5,
+    idleTimeoutMillis: 30000,       // drop idle connections before the host does
+    connectionTimeoutMillis: 15000, // allow time for a sleeping database to wake up
   });
+  // Without this handler, a connection closed by the database host (e.g. Neon suspending
+  // an idle project) would raise an unhandled 'error' event and crash the whole server.
+  pool.on('error', (e) => console.error('[pg] idle client error (ignored):', e.message));
+  // Retry once on transient connection errors (database waking up, connection reset)
+  const query = async (...args) => {
+    try {
+      return await pool.query(...args);
+    } catch (e) {
+      if (/terminat|ECONNRESET|ETIMEDOUT|ECONNREFUSED|Connection|timeout/i.test(e.message)) {
+        await new Promise((r) => setTimeout(r, 1000));
+        return pool.query(...args);
+      }
+      throw e;
+    }
+  };
 
   const rowToMessage = (r) => {
     const base = {
@@ -75,7 +94,7 @@ function pgStore(connectionString) {
   return {
     kind: 'postgres',
     async init() {
-      await pool.query(`
+      await query(`
         CREATE TABLE IF NOT EXISTS rooms (
           name          TEXT PRIMARY KEY,
           password_hash TEXT,
@@ -110,18 +129,18 @@ function pgStore(connectionString) {
       `);
     },
     async loadRooms() {
-      const { rows } = await pool.query('SELECT name, password_hash, salt, owner FROM rooms');
+      const { rows } = await query('SELECT name, password_hash, salt, owner FROM rooms');
       return rows.map((r) => ({ name: r.name, passwordHash: r.password_hash, salt: r.salt, owner: r.owner }));
     },
     async saveRoom(r) {
-      await pool.query(
+      await query(
         'INSERT INTO rooms (name, password_hash, salt, owner) VALUES ($1,$2,$3,$4) ON CONFLICT (name) DO NOTHING',
         [r.name, r.passwordHash, r.salt, r.owner]
       );
     },
     async saveMessage(m) {
       const f = m.file || {};
-      await pool.query(
+      await query(
         `INSERT INTO messages (id, room, type, username, text, file_name, file_size, file_mime, file_key, ts,
                                reply_to, edited, deleted, reactions)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14::jsonb)`,
@@ -132,15 +151,15 @@ function pgStore(connectionString) {
         ]
       );
     },
-    async history(room) {
-      const { rows } = await pool.query(
-        'SELECT * FROM messages WHERE room = $1 ORDER BY ts DESC LIMIT $2',
-        [room, HISTORY_LIMIT]
+    async history(room, before = Number.MAX_SAFE_INTEGER, limit = HISTORY_LIMIT) {
+      const { rows } = await query(
+        'SELECT * FROM messages WHERE room = $1 AND ts < $2 ORDER BY ts DESC LIMIT $3',
+        [room, before, limit]
       );
       return rows.reverse().map(rowToMessage);
     },
     async getMessage(id) {
-      const { rows } = await pool.query('SELECT * FROM messages WHERE id = $1', [id]);
+      const { rows } = await query('SELECT * FROM messages WHERE id = $1', [id]);
       return rows[0] ? rowToMessage(rows[0]) : null;
     },
     async updateMessage(id, patch) {
@@ -152,21 +171,21 @@ function pgStore(connectionString) {
       if ('reactions' in patch) add('reactions = ?::jsonb', JSON.stringify(patch.reactions || {}));
       if (patch.deleted) sets.push('deleted = true', 'text = NULL', 'file_key = NULL', 'file_name = NULL', 'reply_to = NULL');
       if (!sets.length) return this.getMessage(id);
-      const { rows } = await pool.query(`UPDATE messages SET ${sets.join(', ')} WHERE id = $1 RETURNING *`, vals);
+      const { rows } = await query(`UPDATE messages SET ${sets.join(', ')} WHERE id = $1 RETURNING *`, vals);
       return rows[0] ? rowToMessage(rows[0]) : null;
     },
     async saveFile(key, data, mime) {
-      await pool.query('INSERT INTO files (key, mime, data) VALUES ($1,$2,$3)', [key, mime, data]);
+      await query('INSERT INTO files (key, mime, data) VALUES ($1,$2,$3)', [key, mime, data]);
     },
     async getFile(key) {
-      const { rows } = await pool.query('SELECT data, mime FROM files WHERE key = $1', [key]);
+      const { rows } = await query('SELECT data, mime FROM files WHERE key = $1', [key]);
       return rows[0] ? { data: rows[0].data, mime: rows[0].mime } : null;
     },
     async deleteFile(key) {
-      await pool.query('DELETE FROM files WHERE key = $1', [key]);
+      await query('DELETE FROM files WHERE key = $1', [key]);
     },
     async fileInRoom(key, room) {
-      const { rows } = await pool.query(
+      const { rows } = await query(
         'SELECT file_name, file_mime FROM messages WHERE room = $1 AND file_key = $2 AND NOT deleted LIMIT 1',
         [room, key]
       );

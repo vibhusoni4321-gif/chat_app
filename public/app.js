@@ -46,6 +46,7 @@
   let roomsCache = [];
   let REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🎉', '🔥', '👀'];
   let msgs = [];               // messages of the active room
+  let hasMore = false;         // are there older messages on the server?
   let replyTo = null;          // { id, user, text }
   let query = '';
   let pendingRoom = null;
@@ -183,6 +184,7 @@
       query = ''; $('search').value = '';
       typingUsers.clear(); renderTyping();
       msgs = res.history.slice();
+      hasMore = !!res.more;
       $('leaveBtn').classList.toggle('hidden', room === 'lobby');
       $('msgForm').classList.remove('hidden');
       renderAll();
@@ -365,7 +367,27 @@
     if (!prev || !sameDay(prev.ts, m.ts)) box.appendChild(sepEl(m.ts));
     box.appendChild(buildMsg(m, prev));
   }
-  function renderAll() {
+  function loadMoreEl() {
+    const b = el('button', 'loadmore', 'Load earlier messages');
+    b.type = 'button';
+    b.onclick = () => {
+      if (!msgs.length) return;
+      b.disabled = true; b.textContent = 'Loading…';
+      const box = $('messages'), oldHeight = box.scrollHeight;
+      socket.emit('history:more', { room: current, before: msgs[0].ts }, (res) => {
+        const have = new Set(msgs.map((m) => m.id));
+        msgs = res.messages.filter((m) => !have.has(m.id)).concat(msgs);
+        hasMore = !!res.more;
+        renderAll(true);
+        box.style.scrollBehavior = 'auto';
+        box.scrollTop = box.scrollHeight - oldHeight; // keep the same message in view
+        box.style.scrollBehavior = '';
+        if (!res.messages.length) toast('No earlier messages');
+      });
+    };
+    return b;
+  }
+  function renderAll(keepScroll) {
     const box = $('messages');
     box.replaceChildren();
     paintHeader();
@@ -377,8 +399,10 @@
       box.appendChild(e);
       return;
     }
+    if (hasMore && !query) box.appendChild(loadMoreEl());
     let prev = null;
     list.forEach((m) => { appendOne(m, prev); prev = m; });
+    if (keepScroll === true) return;
     box.style.scrollBehavior = 'auto';
     box.scrollTop = box.scrollHeight;
     box.dataset.stick = '1';
@@ -404,7 +428,7 @@
     if (m.room !== current) return;
     const prev = msgs[msgs.length - 1];
     msgs.push(m);
-    if (msgs.length > 500) msgs.shift();
+    if (msgs.length > 2000) msgs.shift();
     if (query && !matches(m)) return;
     const box = $('messages');
     const empty = box.querySelector('.empty'); if (empty) empty.remove();

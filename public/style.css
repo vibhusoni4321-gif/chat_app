@@ -279,3 +279,7 @@ h3 { margin: 14px 4px 6px; font-size: 11px; text-transform: uppercase; letter-sp
   .composer { padding: 8px 10px 12px; }
   .icon { width: 34px; height: 34px; }
 }
+
+.loadmore { align-self: center; margin: 4px 0 8px; background: var(--panel2); border: 1px solid var(--border); padding: 6px 16px; border-radius: 99px; font-size: 13px; color: var(--accent); }
+.loadmore:hover { background: var(--panel3); }
+.loadmore:disabled { opacity: .6; cursor: default; }

@@ -8,6 +8,8 @@ const store = require('./store');
 
 const PORT = process.env.PORT || 3000;
 const MAX_FILE_MB = 10;
+const PAGE = 100;       // messages sent when joining a room
+const OLDER_PAGE = 50;  // messages per "load earlier" request
 
 const app = express();
 const server = http.createServer(app);
@@ -202,20 +204,21 @@ io.on('connection', (socket) => {
       if (!u) return cb({ error: 'Not logged in' });
       if (!r) return cb({ error: 'Room not found' });
       if (r.members.has(socket.id)) {
-        return cb({ ok: true, history: await store.history(room), members: memberList(room) });
+        const h = await store.history(room, undefined, PAGE);
+        return cb({ ok: true, history: h, more: h.length === PAGE, members: memberList(room) });
       }
       if (r.passwordHash) {
         const given = hash(String(password || ''), r.salt);
         const ok = crypto.timingSafeEqual(Buffer.from(given), Buffer.from(r.passwordHash));
         if (!ok) return cb({ error: 'Wrong password' });
       }
-      const history = await store.history(room); // load before joining so the new user sees no duplicates
+      const history = await store.history(room, undefined, PAGE); // load before joining so the new user sees no duplicates
       r.members.add(socket.id);
       socket.join(room);
       systemMsg(room, `${u.name} joined`);
       broadcastMembers(room);
       broadcastRooms();
-      cb({ ok: true, history, members: memberList(room) });
+      cb({ ok: true, history, more: history.length === PAGE, members: memberList(room) });
     } catch (e) {
       console.error('room:join failed:', e.message);
       cb({ error: 'Could not join room' });
@@ -223,6 +226,19 @@ io.on('connection', (socket) => {
   });
 
   socket.on('room:leave', (room) => leaveRoom(socket, room));
+
+  // Older messages for the "Load earlier messages" button (members only)
+  socket.on('history:more', async ({ room, before }, cb) => {
+    if (typeof cb !== 'function') return;
+    try {
+      if (!ctx(room)) return cb({ messages: [], more: false });
+      const messages = await store.history(room, Number(before) || Date.now(), OLDER_PAGE);
+      cb({ ok: true, messages, more: messages.length === OLDER_PAGE });
+    } catch (e) {
+      logErr('history:more')(e);
+      cb({ messages: [], more: false });
+    }
+  });
 
   socket.on('message', async ({ room, text, replyTo }) => {
     try {
